@@ -24,3 +24,5 @@ sentence_transformers
 # rank_bm25
 tf-keras
 lancedb
+requests
+beautifulsoup4

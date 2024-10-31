@@ -10,6 +10,8 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from eval_metrics import * 
 from inspeq.client import InspeqEval
 from openai import OpenAI
+import requests
+from bs4 import BeautifulSoup
 
 # Define API keys
 if 'api_key' not in st.session_state: st.session_state['api_key'] = None
@@ -22,9 +24,25 @@ if "vector_store" not in st.session_state: st.session_state['vector_store'] = No
 if "metric_name" not in st.session_state: st.session_state['metric_name'] = None
 if "score" not in st.session_state: st.session_state['score'] = None
 if "label" not in st.session_state: st.session_state['label'] = None
+if "url" not in st.session_state: st.session_state['url'] = None
 
 st.set_page_config(page_title="Document Genie", layout="wide")
 
+def scraper(url):
+    response = requests.get(url)
+
+    # Step 2: Check if the request was successful
+    if response.status_code == 200:
+        # Step 3: Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Step 4: Extract specific content (e.g., all paragraph text)
+        paragraphs = soup.find_all("p")  # Finds all paragraph tags
+        content = [p.get_text() for p in paragraphs]  # Extracts text from each <p> tag
+        print(content)
+    else:
+        print(f"Failed to retrieve the webpage. Status code: {response.status_code}")
+    return content
 def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
@@ -59,8 +77,6 @@ def get_inspeq_evaluation(prompt, response, context, metric):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 def guardrails(eval_result):
-    prompt_metrics = ["PROMPT_INJECTION", "INVISIBLE_TEXT"]
-    response_metrics = ["RESPONSE_TONE", "DATA_LEAKAGE", "INSECURE_OUTPUT", "TOXICITY"]
     metrics  = []
     scores = []
     labels = []
@@ -149,18 +165,21 @@ def main():
         st.session_state['api_key'] = st.text_input("OpenAI API Key:", type="password", key="api_key_input")
         st.session_state['INSPEQ_API_KEY'] = st.text_input("Inspeq API Key:", type="password", key="inspeq_api_key")
         st.session_state['INSPEQ_PROJECT_ID'] = st.text_input("Inspeq Project ID:", type="password", key="inspeq_project_id")
+        st.session_state['url'] = st.text_input("Enter Website URL", type="default", key="web_url")
 
         _ =  st.number_input("Top-K Contxets to fetch", min_value=1, max_value=50, value=3, step=1, key="top_k")
         _ = st.number_input("Chunk Length", min_value=8, max_value=4096, value=512, step=8, key="chunk_size")
         _ = st.number_input("Chunk Overlap Length", min_value=4, max_value=2048, value=64, step=1, key="chunk_overlap")
 
-        st.session_state["pdf"] = st.file_uploader("Upload your PDF Files...", accept_multiple_files=True, key="pdf_uploader")
+        # st.session_state["pdf"] = st.file_uploader("Upload your PDF Files...", accept_multiple_files=True, key="pdf_uploader")
 
-        if st.session_state["pdf"]:
+        if st.session_state["url"]:
             if st.session_state["embed_model"] is None:
                 st.session_state["embed_model"] = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-            raw_text = get_pdf_text(st.session_state["pdf"])
-            build_vector_store(raw_text)
+            raw_text = scraper(st.session_state['url'])
+            web_data = " ".join(raw_text)
+            st.write(web_data)
+            build_vector_store(web_data)
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?"}]

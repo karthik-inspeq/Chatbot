@@ -19,6 +19,9 @@ if 'user_turn' not in st.session_state: st.session_state['user_turn'] = False
 if 'pdf' not in st.session_state: st.session_state['pdf'] = None
 if "embed_model" not in st.session_state: st.session_state['embed_model'] = None
 if "vector_store" not in st.session_state: st.session_state['vector_store'] = None
+if "metric_name" not in st.session_state: st.session_state['metric_name'] = None
+if "score" not in st.session_state: st.session_state['score'] = None
+if "label" not in st.session_state: st.session_state['label'] = None
 
 st.set_page_config(page_title="Document Genie", layout="wide")
 
@@ -173,25 +176,25 @@ def main():
 
         eval_result = evaluate_all(prompt, [item.page_content for item in contexts_with_scores], response, list_of_metrics)
         metric_name, score, labels, responses = guardrails(eval_result)
+        st.session_state["metric_name"] = metric_name
+        st.session_state["score"] = score
+        st.session_state["label"] = labels
         guardrail_response = "\n".join(responses)
         if responses:
             final_response = guardrail_response
         else:
             final_response = response
         st.chat_message("assistant").write(final_response)
-    with st.expander("Click to see all the evaluation metrics"):
-        st.write(len(metric_name))
-        st.write(len(score))
-        st.write(len(labels))
+        with st.expander("Click to see all the evaluation metrics"):
 
-        final_result = {
-            "Metric": metric_name,
-            # "Evaluation Result": eval,
-            "Score": score,
-            "Label": labels
-        }
-        df = pd.DataFrame(final_result)
-        st.table(df)
+            final_result = {
+                "Metric": st.session_state["metric_name"],
+                # "Evaluation Result": eval,
+                "Score": st.session_state["score"],
+                "Label": st.session_state["label"]
+            }
+            df = pd.DataFrame(final_result)
+            st.table(df)
 
 if __name__ == "__main__":
     main()

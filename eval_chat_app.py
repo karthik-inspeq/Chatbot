@@ -92,7 +92,7 @@ def guardrails(eval_result):
             scores.append(score)
             metric_labels.append(metric_label)
             label = verdict[0]
-            if label == "Fail" and label != "N/A":
+            if label == "Fail" or label != "N/A":
                 if new_name == "PROMPT_INJECTION":
                     response = f"{new_name}: It looks like your message contains instructions that could interfere with the chatbot’s normal operation. For security, let's keep questions straightforward. Feel free to ask about any topic, and I'll do my best to help!\n\n"
                     responses.append(response)
@@ -140,7 +140,7 @@ def user_input(user_question):
     
     # Generate a response using the combined context
     chain = get_conversational_chain()
-    response = chain({"input_documents": contexts_with_scores, "question": user_question}, return_only_outputs=True)
+    response = chain({"input_documents": contexts_with_scores, "question": user_question, "context":context_combined}, return_only_outputs=True)
     
     return contexts_with_scores, response["output_text"]
 

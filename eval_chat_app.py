@@ -92,7 +92,7 @@ def guardrails(eval_result):
             scores.append(score)
             metric_labels.append(metric_label)
             label = verdict[0]
-            if label == "Fail" or label != "N/A":
+            if label == "Fail" and label != "N/A":
                 if new_name == "PROMPT_INJECTION":
                     response = f"{new_name}: It looks like your message contains instructions that could interfere with the chatbot’s normal operation. For security, let's keep questions straightforward. Feel free to ask about any topic, and I'll do my best to help!\n\n"
                     responses.append(response)
@@ -119,7 +119,7 @@ def get_conversational_chain():
     prompt_template = """
     Answer the question as detailed as possible from the provided context, 
     while considering prior context if available. If the answer is not in 
-    provided context, say, "I don't think the answer is available in the context".
+    provided context, say, "No".
     
     Context:\n{context}\n
     Question:\n{question}\n
@@ -141,8 +141,22 @@ def user_input(user_question):
     # Generate a response using the combined context
     chain = get_conversational_chain()
     response = chain({"input_documents": contexts_with_scores, "question": user_question, "context":context_combined}, return_only_outputs=True)
-    
-    return contexts_with_scores, response["output_text"]
+    if response["output_text"] in ["No.", "No"]:
+        client = OpenAI(api_key=st.session_state["api_key"])
+
+        completion = client.chat.completions.create(
+        model="gpt-3.5-turbo-0125",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
+                "role": "user",
+                "content": user_question
+            }
+        ]
+    )
+        return contexts_with_scores, completion.choices[0].message.content
+    else:
+        return contexts_with_scores, response["output_text"]
 
 def evaluate_all(query, context_lis, response, metrics_list):
 

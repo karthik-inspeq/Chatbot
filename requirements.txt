@@ -5,24 +5,10 @@ langchain-community
 PyPDF2
 inspeqai
 python-dotenv
-# chromadb
-# faiss-cpu
-# tiktoken
-# textstat
-# evaluate
-sentence_transformers
-# tensorflow
-# bert-score
-# spacy
-# nltk
-# rouge_score
-# sacrebleu
-# sacremoses
-# fuzzywuzzy
-# python-Levenshtein
-# levenshtein
-# rank_bm25
-tf-keras
+trulens 
+trulens-providers-openai 
+chromadb 
+openai
 lancedb
 requests
 beautifulsoup4

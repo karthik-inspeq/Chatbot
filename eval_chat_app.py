@@ -24,6 +24,9 @@ from trulens.core import Feedback
 from trulens.core import Select
 # from trulens.providers.openai import OpenAI
 from truelens_RAG import inspeq_result
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Define API keys
 if 'api_key' not in st.session_state: st.session_state['api_key'] = ""

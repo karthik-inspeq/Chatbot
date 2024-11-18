@@ -7,7 +7,7 @@ inspeqai
 python-dotenv
 trulens 
 trulens-providers-openai 
-chromadb 
+chromadb==0.3.29
 openai
 lancedb
 requests

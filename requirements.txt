@@ -1,12 +1,12 @@
 streamlit
 langchain
-langchain-openai
+langchain-openai>=0.1.19,<0.2.0
 langchain-community
 PyPDF2
 inspeqai
 python-dotenv
-trulens 
-trulens-providers-openai 
+trulens
+trulens-providers-openai==1.0.4
 chromadb==0.3.29
 openai
 lancedb

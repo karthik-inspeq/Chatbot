@@ -22,7 +22,7 @@ from trulens.core.guardrails.base import context_filter
 import numpy as np
 from trulens.core import Feedback
 from trulens.core import Select
-from trulens.providers.openai import OpenAI
+# from trulens.providers.openai import OpenAI
 from truelens_RAG import inspeq_result
 
 # Define API keys
@@ -134,13 +134,8 @@ def fetch_context(query, guardrail):
         st.session_state['rag'] = FilteredRAG()
     else:
         st.session_state['rag'] = RAG()
-    tru_rag = TruCustomApp(
-    st.session_state["rag"],
-    app_name="RAG",
-    app_version="base",
-    )
     if st.session_state["vector_store"]:
-        rag_query = st.session_state["rag"].query(query, st.session_state['vector_store'], st.session_state["top_k"])
+        rag_query = st.session_state["rag"].query(query, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
         return rag_query
 
 def get_inspeq_evaluation(prompt, response, context, metric):
@@ -177,68 +172,9 @@ def guardrails(eval_result):
             scores.append(score)
             metric_labels.append(metric_label)
             label = verdict[0]
-            # if label == "Fail" and label != "N/A":
-            #     if new_name == "PROMPT_INJECTION":
-            #         response = f"{new_name}: It looks like your message contains instructions that could interfere with the chatbot’s normal operation. For security, let's keep questions straightforward. Feel free to ask about any topic, and I'll do my best to help!\n\n"
-            #         responses.append(response)
-            #     elif new_name == "INVISIBLE_TEXT":
-            #         response = f"{new_name}: Your message contains hidden text or characters that I couldn't fully interpret. Please rephrase your question clearly, and I'll be happy to assist!\n"
-            #         responses.append(response)
-            #     elif new_name == "DATA_LEAKAGE":
-            #         response = f"{new_name}: For privacy and security, I'm unable to continue with this request as it might involve sensitive or confidential information. Please rephrase or try asking in a different way!\n"
-            #         responses.append(response)
-            #     elif new_name == "INSECURE_OUTPUT":
-            #         response = f"{new_name}: I'm unable to provide information in this format as it may pose security risks. Please try rephrasing your question to avoid any sensitive or potentially harmful content.\n"
-            #         responses.append(response)
-            #     elif new_name == "TOXICITY":
-            #         response = f"{new_name}: I'm here to help with respectful and constructive conversations. Let’s keep it positive! Please feel free to ask me anything in a considerate way.\n"
-            #         responses.append(response)
             labels.append(label)
             metrics.append(new_name)
     return metrics,scores,  metric_labels, responses
-
-# def get_conversational_chain():
-#     prompt_template = """
-#     Answer the question as detailed as possible from the provided context, 
-#     while considering prior context if available. If the answer is not in 
-#     provided context, say, "No".
-    
-#     Context:\n{context}\n
-#     Question:\n{question}\n
-#     Answer:
-#     """
-#     model = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, openai_api_key=st.session_state['api_key'])
-#     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-#     return load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
-# def user_input(user_question):
-#     # Retrieve the most relevant context
-#     contexts_with_scores = fetch_context(user_question)
-#     # Get previous conversation context
-#     prior_context = "\n".join([msg["content"] for msg in st.session_state["messages"] if msg["role"] == "assistant"])
-    
-#     # Combine prior context with the current relevant document context
-#     context_combined = prior_context + "\n\n" + "\n".join([doc.page_content for doc in contexts_with_scores])
-    
-#     # Generate a response using the combined context
-#     chain = get_conversational_chain()
-#     response = chain({"input_documents": contexts_with_scores, "question": user_question, "context":context_combined}, return_only_outputs=True)
-#     if response["output_text"] in ["No.", "No"]:
-#         client = OpenAI(api_key=st.session_state["api_key"])
-
-#         completion = client.chat.completions.create(
-#         model="gpt-3.5-turbo-0125",
-#         messages=[
-#             {"role": "system", "content": "You are a helpful assistant."},
-#             {
-#                 "role": "user",
-#                 "content": user_question
-#             }
-#         ]
-#     )
-#         return contexts_with_scores, completion.choices[0].message.content
-#     else:
-#         return contexts_with_scores, response["output_text"]
 
 def evaluate_all(query, context_lis, response, metrics_list):
 

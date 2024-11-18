@@ -19,44 +19,58 @@ class RAG:
         return [doc for sublist in results["documents"] for doc in sublist]
 
     @instrument
-    def generate_completion(self, query: str, context_str: list) -> str:
+    def generate_completion(self, query: str, context_str: list, messages: list) -> str:
         """
         Generate answer from context.
         """
         oai_client = OpenAI()
+        first_query = {
+                            "role": "user",
+                            "content": f"We have provided context information below. \n"
+                            f"---------------------\n"
+                            f"{context_str}"
+                            f"\n---------------------\n"
+                            f"First, say hello and that you're happy to help. \n"
+                            f"\n---------------------\n"
+                            f"Then, given this information, please answer the question: {query}",
+                        }
+        if len(messages) > 25:
+            return "Maximum context length reached. refresh the page"
         if len(context_str) == 0:
-            return "Sorry, I couldn't find an answer to your question."
-
-        completion = (
+            completion = (
             oai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 temperature=0,
                 messages=[
                     {
                         "role": "user",
-                        "content": f"We have provided context information below. \n"
-                        f"---------------------\n"
-                        f"{context_str}"
-                        f"\n---------------------\n"
-                        f"First, say hello and that you're happy to help. \n"
-                        f"\n---------------------\n"
-                        f"Then, given this information, please answer the question: {query}",
+                        "content": f"Please answer the following question: {query}"
                     }
                 ],
             )
             .choices[0]
             .message.content
         )
+        else: 
+            completion = (
+                oai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    temperature=0,
+                    messages=messages + [first_query]
+                )
+                .choices[0]
+                .message.content
+            )
         if completion:
             return completion
         else:
             return "Did not find an answer."
 
     @instrument
-    def query(self, query: str, vector_store, n_results) -> str:
+    def query(self, query: str, vector_store, n_results, messages) -> str:
         context_str = self.retrieve(query=query, vector_store = vector_store, n_results = n_results)
         completion = self.generate_completion(
-            query=query, context_str=context_str
+            query=query, context_str=context_str, messages = messages
         )
         return completion
     

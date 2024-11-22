@@ -12,4 +12,4 @@ openai
 lancedb
 requests
 beautifulsoup4
-pysqlite3-binary
+# pysqlite3-binary

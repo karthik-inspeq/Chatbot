@@ -2,11 +2,10 @@ from openai import OpenAI
 from trulens.apps.custom import instrument
 from trulens.core import TruSession
 from inspeq.client import InspeqEval
-
-
+import os
 
 session = TruSession()
-# session.reset_database()
+session.reset_database()
 
 class RAG:
     @instrument
@@ -34,8 +33,8 @@ class RAG:
                             f"\n---------------------\n"
                             f"Then, given this information, please answer the question: {query}",
                         }
-        if len(messages) > 25:
-            return "Maximum context length reached. refresh the page"
+        # if len(messages) > 25:
+        #     return "Maximum context length reached. refresh the page"
         if len(context_str) == 0:
             completion = (
             oai_client.chat.completions.create(
@@ -56,7 +55,7 @@ class RAG:
                 oai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     temperature=0,
-                    messages=messages + [first_query]
+                    messages=[first_query]
                 )
                 .choices[0]
                 .message.content
@@ -68,31 +67,78 @@ class RAG:
 
     @instrument
     def query(self, query: str, vector_store, n_results, messages) -> str:
+        session.reset_database()
         context_str = self.retrieve(query=query, vector_store = vector_store, n_results = n_results)
         completion = self.generate_completion(
             query=query, context_str=context_str, messages = messages
         )
+
         return completion
     
-def inspeq_result(prompt, context):
-    INSPEQ_API_KEY = "hnjngrectuqnszvilzofzrekgxycjppb"
-    INSPEQ_PROJECT_ID = "cd563657-3afb-486f-9a32-870378b92e75"
-    INSPEQ_API_URL = "https://stage-api.inspeq.ai"# Required only for our on-prem customers
+def inspeq_result(prompt,context):
+    response = os.environ["response"]
     metrics_list = [
-        "NSFW_DETECTION",
+        "TOXICITY",
         ]
     input_data= [
                 {
                     "prompt": prompt,
-                    "context": "string",
-                    "response": context
-                }]
+                    "context": context,
+                    "response":context
+                }
+                ]
 
-    inspeq_eval = InspeqEval(inspeq_api_key=INSPEQ_API_KEY, inspeq_project_id=INSPEQ_PROJECT_ID,inspeq_api_url= INSPEQ_API_URL)
+    inspeq_eval = InspeqEval(inspeq_api_key=os.environ["INSPEQ_API_KEY"], inspeq_project_id= os.environ["INSPEQ_PROJECT_ID"])
     results = inspeq_eval.evaluate_llm_task(
             metrics_list=metrics_list,
             input_data=input_data,
-            task_name="My Task"
+            task_name="filtering"
         )
     final_result = float(results["results"][0]["evaluation_details"]["actual_value"])
     return 1 - final_result
+
+def inspeq_result_unfiltered(prompt,context):
+    response = os.environ["response"]
+    metrics_list = [
+        "TOXICITY",
+        ]
+    input_data= [
+                {
+                    "prompt": prompt,
+                    "context": context,
+                    "response":response
+                }
+                ]
+
+    inspeq_eval = InspeqEval(inspeq_api_key=os.environ["INSPEQ_API_KEY"], inspeq_project_id= os.environ["INSPEQ_PROJECT_ID"])
+    results = inspeq_eval.evaluate_llm_task(
+            metrics_list=metrics_list,
+            input_data=input_data,
+            task_name="unfiltered"
+        )
+    final_result = float(results["results"][0]["evaluation_details"]["actual_value"])
+    return final_result
+
+def inspeq_result_filtered(prompt,context):
+    response = os.environ["response"]
+    metrics_list = [
+        "TOXICITY",
+        ]
+    input_data= [
+                {
+                    "prompt": prompt,
+                    "context": context,
+                    "response":response
+                }
+                ]
+
+    inspeq_eval = InspeqEval(inspeq_api_key=os.environ["INSPEQ_API_KEY"], inspeq_project_id= os.environ["INSPEQ_PROJECT_ID"])
+    results = inspeq_eval.evaluate_llm_task(
+            metrics_list=metrics_list,
+            input_data=input_data,
+            task_name="filtered"
+        )
+    final_result = float(results["results"][0]["evaluation_details"]["actual_value"])
+    return final_result
+
+

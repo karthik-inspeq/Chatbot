@@ -1,3 +1,5 @@
+
+
 import streamlit as st
 import pandas as pd
 import os
@@ -15,23 +17,23 @@ import requests
 from bs4 import BeautifulSoup
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-from truelens_RAG import RAG
+from guardrail_RAG import RAG
 from trulens.apps.custom import TruCustomApp
 from trulens.apps.custom import instrument
-from trulens.core.guardrails.base import context_filter
+from trulens.core.guardrails.base import context_filter, block_output, block_input
 import numpy as np
 from trulens.core import Feedback
 from trulens.core import Select
-# from trulens.providers.openai import OpenAI
-from truelens_RAG import inspeq_result
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+from trulens.providers.openai import OpenAI
+from guardrail_RAG import inspeq_result, inspeq_result_filtered, inspeq_result_unfiltered
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Define API keys
 if 'api_key' not in st.session_state: st.session_state['api_key'] = ""
-if 'INSPEQ_API_KEY' not in st.session_state: st.session_state['INSPEQ_API_KEY'] = None
-if 'INSPEQ_PROJECT_ID' not in st.session_state: st.session_state['INSPEQ_PROJECT_ID'] = None
+if 'INSPEQ_API_KEY' not in st.session_state: st.session_state['INSPEQ_API_KEY'] = ""
+if 'INSPEQ_PROJECT_ID' not in st.session_state: st.session_state['INSPEQ_PROJECT_ID'] = ""
 if 'user_turn' not in st.session_state: st.session_state['user_turn'] = False
 if 'pdf' not in st.session_state: st.session_state['pdf'] = None
 if "embed_model" not in st.session_state: st.session_state['embed_model'] = None
@@ -44,14 +46,31 @@ if "rag" not in st.session_state: st.session_state['rag'] = None
 if "text_chunks" not in st.session_state: st.session_state['text_chunks'] = None
 if "inspeq_result_function" not in st.session_state: st.session_state["inspeq_result_function"] = None
 if "guardrail" not in st.session_state: st.session_state["guardrail"] = None
+if "real_response" not in st.session_state: st.session_state["real_response"] = ""
 
 os.environ["OPENAI_API_KEY"] = st.session_state["api_key"]
+os.environ["INSPEQ_API_KEY"] = st.session_state["INSPEQ_API_KEY"]
+os.environ["INSPEQ_PROJECT_ID"] = st.session_state["INSPEQ_PROJECT_ID"] 
+# os.environ["INSPEQ_API_URL"] = "https://stage-api.inspeq.ai"
 
 chromadb.api.client.SharedSystemClient.clear_system_cache()
 st.set_page_config(page_title="Document Genie", layout="wide")
 
+# def inspeq_final(prompt, context):
+#     # rag = RAG()
+#     # response = rag.query(prompt, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+#     # # response = st.session_state.get("real_response", None)
+#     # if response is None:
+#     #     raise ValueError("real_response is not set in session state.")
+#     # prompt = "string"
+#     # context = "string"
+#     response = "string"
+#     score = inspeq_result(prompt, context, response)
+#     return score
 class FilteredRAG(RAG):
+    # if st.session_state["real_response"]:
     test_filter = Feedback(inspeq_result, name = "nsfw").on_input().on(Select.RecordCalls.retrieve.rets[:]).aggregate(np.mean)
+    # test_filter = Feedback(inspeq_final, name = "nsfw").on_input_output()
     @instrument
     @context_filter(
         feedback=test_filter,
@@ -93,7 +112,9 @@ def get_pdf_text(pdf_docs):
 
 
 def build_vector_store(text):
-    text = "the policeman told the theif'I will fucking kill you' as he was running away" + text
+    # This is the context we add artificially to demonstrate
+    artificial = "\n. 'sex freak after jfk and a... a rape freak data children he must have lived with us cumming in our wife everyday'.\n"
+    text = artificial + text
     embedding_function = OpenAIEmbeddingFunction(
     api_key=os.environ.get("OPENAI_API_KEY"),
     model_name="text-embedding-ada-002"
@@ -133,12 +154,24 @@ from inspeq.client import InspeqEval
 from pprint import pprint
 
 def fetch_context(query, guardrail):
-    if guardrail:
-        st.session_state['rag'] = FilteredRAG()
-    else:
-        st.session_state['rag'] = RAG()
+    rag = RAG()
     if st.session_state["vector_store"]:
-        rag_query = st.session_state["rag"].query(query, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+        tru_rag_query = rag.query(query, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+        os.environ["response"] = tru_rag_query
+        context = rag.retrieve(query, st.session_state['vector_store'], st.session_state["top_k"])
+        # st.session_state["real_response"] = tru_rag_query
+        if guardrail:
+            filtered_rag = FilteredRAG()
+            rag_query = filtered_rag.query(query, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+            os.environ["response"] = rag_query
+            context = filtered_rag.retrieve(query, st.session_state['vector_store'], st.session_state["top_k"])
+            total_context = " ".join(context)
+            inspeq_result_filtered(query, total_context)
+
+        else:
+            rag_query = tru_rag_query
+            total_context = " ".join(context)
+            inspeq_result_unfiltered(query, total_context)
         return rag_query
 
 def get_inspeq_evaluation(prompt, response, context, metric):
@@ -207,8 +240,6 @@ def main():
         _ = st.number_input("Chunk Length", min_value=8, max_value=4096, value=512, step=8, key="chunk_size")
         _ = st.number_input("Chunk Overlap Length", min_value=4, max_value=2048, value=64, step=1, key="chunk_overlap")
 
-        # st.session_state["pdf"] = st.file_uploader("Upload your PDF Files...", accept_multiple_files=True, key="pdf_uploader")
-
         if st.session_state["url"]:
             if st.session_state["embed_model"] is None:
                 st.session_state["embed_model"] = OpenAIEmbeddingFunction(
@@ -233,27 +264,9 @@ def main():
         response = fetch_context(prompt, st.session_state['guardrail'])
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-        eval_result = evaluate_all(prompt, st.session_state['text_chunks'], response, list_of_metrics)
-        metric_name, score, labels, responses = guardrails(eval_result)
-        st.session_state["metric_name"] = metric_name
-        st.session_state["score"] = score
-        st.session_state["label"] = labels
-        # guardrail_response = "\n".join(responses)
-        # if responses:
-        #     final_response = guardrail_response
-        # else:
         final_response = response
         st.chat_message("assistant").write(final_response)
-        with st.expander("Click to see all the evaluation metrics"):
 
-            final_result = {
-                "Metric": st.session_state["metric_name"],
-                # "Evaluation Result": eval,
-                "Score": st.session_state["score"],
-                "Label": st.session_state["label"]
-            }
-            df = pd.DataFrame(final_result)
-            st.table(df)
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,8 @@
+
+
 import streamlit as st
 import pandas as pd
+import os
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import LanceDB
@@ -12,11 +15,25 @@ from inspeq.client import InspeqEval
 from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
+import chromadb
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+from guardrail_RAG import RAG
+from trulens.apps.custom import TruCustomApp
+from trulens.apps.custom import instrument
+from trulens.core.guardrails.base import context_filter, block_output, block_input
+import numpy as np
+from trulens.core import Feedback
+from trulens.core import Select
+from trulens.providers.openai import OpenAI
+from guardrail_RAG import inspeq_result, inspeq_result_filtered, inspeq_result_unfiltered
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Define API keys
-if 'api_key' not in st.session_state: st.session_state['api_key'] = None
-if 'INSPEQ_API_KEY' not in st.session_state: st.session_state['INSPEQ_API_KEY'] = None
-if 'INSPEQ_PROJECT_ID' not in st.session_state: st.session_state['INSPEQ_PROJECT_ID'] = None
+if 'api_key' not in st.session_state: st.session_state['api_key'] = ""
+if 'INSPEQ_API_KEY' not in st.session_state: st.session_state['INSPEQ_API_KEY'] = ""
+if 'INSPEQ_PROJECT_ID' not in st.session_state: st.session_state['INSPEQ_PROJECT_ID'] = ""
 if 'user_turn' not in st.session_state: st.session_state['user_turn'] = False
 if 'pdf' not in st.session_state: st.session_state['pdf'] = None
 if "embed_model" not in st.session_state: st.session_state['embed_model'] = None
@@ -25,8 +42,50 @@ if "metric_name" not in st.session_state: st.session_state['metric_name'] = None
 if "score" not in st.session_state: st.session_state['score'] = None
 if "label" not in st.session_state: st.session_state['label'] = None
 if "url" not in st.session_state: st.session_state['url'] = None
+if "rag" not in st.session_state: st.session_state['rag'] = None
+if "text_chunks" not in st.session_state: st.session_state['text_chunks'] = None
+if "inspeq_result_function" not in st.session_state: st.session_state["inspeq_result_function"] = None
+if "guardrail" not in st.session_state: st.session_state["guardrail"] = None
+if "real_response" not in st.session_state: st.session_state["real_response"] = ""
 
+os.environ["OPENAI_API_KEY"] = st.session_state["api_key"]
+os.environ["INSPEQ_API_KEY"] = st.session_state["INSPEQ_API_KEY"]
+os.environ["INSPEQ_PROJECT_ID"] = st.session_state["INSPEQ_PROJECT_ID"] 
+# os.environ["INSPEQ_API_URL"] = "https://stage-api.inspeq.ai"
+
+chromadb.api.client.SharedSystemClient.clear_system_cache()
 st.set_page_config(page_title="Document Genie", layout="wide")
+
+# def inspeq_final(prompt, context):
+#     # rag = RAG()
+#     # response = rag.query(prompt, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+#     # # response = st.session_state.get("real_response", None)
+#     # if response is None:
+#     #     raise ValueError("real_response is not set in session state.")
+#     # prompt = "string"
+#     # context = "string"
+#     response = "string"
+#     score = inspeq_result(prompt, context, response)
+#     return score
+class FilteredRAG(RAG):
+    # if st.session_state["real_response"]:
+    test_filter = Feedback(inspeq_result, name = "nsfw").on_input().on(Select.RecordCalls.retrieve.rets[:]).aggregate(np.mean)
+    # test_filter = Feedback(inspeq_final, name = "nsfw").on_input_output()
+    @instrument
+    @context_filter(
+        feedback=test_filter,
+        threshold=0.5,
+        keyword_for_prompt="query",
+    )
+    def retrieve(self, query: str, vector_store, n_results) -> list:
+        """
+        Retrieve relevant text from vector store.
+        """
+        results = vector_store.query(query_texts=query, n_results=n_results)
+        if "documents" in results and results["documents"]:
+            return [doc for sublist in results["documents"] for doc in sublist]
+        else:
+            return []
 
 def scraper(url):
     response = requests.get(url)
@@ -51,13 +110,52 @@ def get_pdf_text(pdf_docs):
             text += page.extract_text()
     return text
 
-def build_vector_store(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=st.session_state['chunk_size'], chunk_overlap=st.session_state['chunk_overlap'])
-    text_chunks = text_splitter.split_text(text)
-    st.session_state['vector_store'] = LanceDB.from_texts(text_chunks, st.session_state["embed_model"])
 
-def fetch_context(query):
-    return st.session_state['vector_store'].similarity_search(query, k=st.session_state['top_k'])
+def build_vector_store(text):
+    text = "the policeman told the theif'I will fucking kill you' as he was running away" + text
+    embedding_function = OpenAIEmbeddingFunction(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    model_name="text-embedding-ada-002"
+)
+    # Define chunking parameters
+    chunk_size = st.session_state["chunk_size"]  # Define desired chunk size
+    chunk_overlap = st.session_state["chunk_overlap"] # Define desired chunk overlap
+
+    # Initialize the text splitter with the desired chunk size and overlap
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
+    )
+
+    # Split the context into chunks
+    text_chunks = text_splitter.split_text(text)
+
+    # Initialize Chroma client and create/get a collection
+    chroma_client = chromadb.Client()
+    st.session_state['vector_store'] = chroma_client.get_or_create_collection(name="nsfw", embedding_function=embedding_function)
+
+    # Generate unique IDs for each chunk (e.g., "nsfw_context_0", "nsfw_context_1", ...)
+    ids = [f"ids_{i}" for i in range(len(text_chunks))]
+
+    # Add the text chunks to the vector store
+    try:
+        st.session_state['vector_store'].add(
+            documents=text_chunks,
+            ids=ids
+        )
+        print("Documents added to the vector store successfully.")
+    except Exception as e:
+        print("Error adding documents to the vector store:", e)
+    return text_chunks
+# NSFW detection
+from inspeq.client import InspeqEval
+from pprint import pprint
+
+def fetch_context(query, guardrail):
+    rag = RAG()
+    if st.session_state["vector_store"]:
+        rag_query = st.session_state["rag"].query(query, st.session_state['vector_store'], st.session_state["top_k"], st.session_state["messages"])
+        return rag_query
 
 def get_inspeq_evaluation(prompt, response, context, metric):
     inspeq_eval = InspeqEval(inspeq_api_key=st.session_state['INSPEQ_API_KEY'], inspeq_project_id= st.session_state['INSPEQ_PROJECT_ID'])
@@ -76,6 +174,7 @@ def get_inspeq_evaluation(prompt, response, context, metric):
         return output
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+
 def guardrails(eval_result):
     metrics  = []
     scores = []
@@ -92,71 +191,9 @@ def guardrails(eval_result):
             scores.append(score)
             metric_labels.append(metric_label)
             label = verdict[0]
-            if label == "Fail" and label != "N/A":
-                if new_name == "PROMPT_INJECTION":
-                    response = f"{new_name}: It looks like your message contains instructions that could interfere with the chatbot’s normal operation. For security, let's keep questions straightforward. Feel free to ask about any topic, and I'll do my best to help!\n\n"
-                    responses.append(response)
-                elif new_name == "INVISIBLE_TEXT":
-                    response = f"{new_name}: Your message contains hidden text or characters that I couldn't fully interpret. Please rephrase your question clearly, and I'll be happy to assist!\n"
-                    responses.append(response)
-                elif new_name == "RESPONSE_TONE":
-                    response = f"{new_name}: It seems like my response tone might not have been as expected. Let me know if you'd like a different approach, and I'll make sure to adjust!\n"
-                    responses.append(response)
-                elif new_name == "DATA_LEAKAGE":
-                    response = f"{new_name}: For privacy and security, I'm unable to continue with this request as it might involve sensitive or confidential information. Please rephrase or try asking in a different way!\n"
-                    responses.append(response)
-                elif new_name == "INSECURE_OUTPUT":
-                    response = f"{new_name}: I'm unable to provide information in this format as it may pose security risks. Please try rephrasing your question to avoid any sensitive or potentially harmful content.\n"
-                    responses.append(response)
-                elif new_name == "TOXICITY":
-                    response = f"{new_name}: I'm here to help with respectful and constructive conversations. Let’s keep it positive! Please feel free to ask me anything in a considerate way.\n"
-                    responses.append(response)
             labels.append(label)
             metrics.append(new_name)
     return metrics,scores,  metric_labels, responses
-
-def get_conversational_chain():
-    prompt_template = """
-    Answer the question as detailed as possible from the provided context, 
-    while considering prior context if available. If the answer is not in 
-    provided context, say, "No".
-    
-    Context:\n{context}\n
-    Question:\n{question}\n
-    Answer:
-    """
-    model = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0, openai_api_key=st.session_state['api_key'])
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    return load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
-def user_input(user_question):
-    # Retrieve the most relevant context
-    contexts_with_scores = fetch_context(user_question)
-    # Get previous conversation context
-    prior_context = "\n".join([msg["content"] for msg in st.session_state["messages"] if msg["role"] == "assistant"])
-    
-    # Combine prior context with the current relevant document context
-    context_combined = prior_context + "\n\n" + "\n".join([doc.page_content for doc in contexts_with_scores])
-    
-    # Generate a response using the combined context
-    chain = get_conversational_chain()
-    response = chain({"input_documents": contexts_with_scores, "question": user_question, "context":context_combined}, return_only_outputs=True)
-    if response["output_text"] in ["No.", "No"]:
-        client = OpenAI(api_key=st.session_state["api_key"])
-
-        completion = client.chat.completions.create(
-        model="gpt-3.5-turbo-0125",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {
-                "role": "user",
-                "content": user_question
-            }
-        ]
-    )
-        return contexts_with_scores, completion.choices[0].message.content
-    else:
-        return contexts_with_scores, response["output_text"]
 
 def evaluate_all(query, context_lis, response, metrics_list):
 
@@ -180,20 +217,23 @@ def main():
         st.session_state['INSPEQ_API_KEY'] = st.text_input("Inspeq API Key:", type="password", key="inspeq_api_key")
         st.session_state['INSPEQ_PROJECT_ID'] = st.text_input("Inspeq Project ID:", type="password", key="inspeq_project_id")
         st.session_state['url'] = st.text_input("Enter Website URL", type="default", key="web_url")
+        st.session_state['guardrail'] = st.toggle("Inspeq Shield")
 
         _ =  st.number_input("Top-K Contxets to fetch", min_value=1, max_value=50, value=3, step=1, key="top_k")
         _ = st.number_input("Chunk Length", min_value=8, max_value=4096, value=512, step=8, key="chunk_size")
         _ = st.number_input("Chunk Overlap Length", min_value=4, max_value=2048, value=64, step=1, key="chunk_overlap")
 
-        # st.session_state["pdf"] = st.file_uploader("Upload your PDF Files...", accept_multiple_files=True, key="pdf_uploader")
-
         if st.session_state["url"]:
             if st.session_state["embed_model"] is None:
-                st.session_state["embed_model"] = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+                st.session_state["embed_model"] = OpenAIEmbeddingFunction(
+                                                api_key=st.session_state['INSPEQ_API_KEY'],
+                                                model_name="text-embedding-ada-002",
+                                            )
             raw_text = scraper(st.session_state['url'])
             web_data = " ".join(raw_text)
             st.write(web_data)
-            build_vector_store(web_data)
+            st.session_state['text_chunks'] = build_vector_store(web_data)
+            st.write(st.session_state['text_chunks'])
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?"}]
@@ -204,30 +244,12 @@ def main():
     if prompt := st.chat_input("Enter your question:"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
-        contexts_with_scores, response = user_input(prompt)
+        response = fetch_context(prompt, st.session_state['guardrail'])
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-        eval_result = evaluate_all(prompt, [item.page_content for item in contexts_with_scores], response, list_of_metrics)
-        metric_name, score, labels, responses = guardrails(eval_result)
-        st.session_state["metric_name"] = metric_name
-        st.session_state["score"] = score
-        st.session_state["label"] = labels
-        guardrail_response = "\n".join(responses)
-        if responses:
-            final_response = guardrail_response
-        else:
-            final_response = response
+        final_response = response
         st.chat_message("assistant").write(final_response)
-        with st.expander("Click to see all the evaluation metrics"):
 
-            final_result = {
-                "Metric": st.session_state["metric_name"],
-                # "Evaluation Result": eval,
-                "Score": st.session_state["score"],
-                "Label": st.session_state["label"]
-            }
-            df = pd.DataFrame(final_result)
-            st.table(df)
 
 if __name__ == "__main__":
     main()

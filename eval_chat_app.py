@@ -29,6 +29,7 @@ from guardrail_RAG import inspeq_result, inspeq_result_filtered, inspeq_result_u
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+import sqlite3
 
 # Define API keys
 if 'api_key' not in st.session_state: st.session_state['api_key'] = ""
